@@ -1,16 +1,25 @@
 -- =============================================================================
--- ExteamLlamas - Migración 001: Tablas esenciales
+-- ExteamLlamas - Migración 001: Esquema inicial (reescritura según diseño 3FN)
 -- Motor: PostgreSQL (Supabase compatible)
--- Descripción:
---   1. usuarios        → personal del sistema con rol y estado
---   2. clientes        → empresas/clientes del servicio
---   3. sucursales      → dependencias físicas de cada cliente
---   4. extintores      → inventario con propiedad, agente, capacidad y estado
--- Integridad referencial:
---   - sucursales.id_cliente  → clientes.id_cliente
---   - extintores.id_cliente  → clientes.id_cliente
---   - extintores (id_sucursal, id_cliente) → sucursales (id_sucursal, id_cliente)
---     (FK compuesta: garantiza que la sucursal exista Y pertenezca al cliente)
+--
+-- Diseño en Tercera Forma Normal (3FN):
+--   * Cada atributo no clave depende únicamente de la PK completa:
+--     - sucursales NO repite datos del cliente → solo referencia id_cliente.
+--     - extintores NO repite datos del cliente → solo referencia id_cliente_propietario.
+--     - No existen grupos repetidos ni dependencias parciales.
+--   * Tablas normalizadas:
+--     1. usuarios        → personal del sistema (PK: id_usuario)
+--     2. clientes        → empresas dueñas de equipos (PK: id_cliente)
+--     3. sucursales      → dependencias de un cliente (PK: id_sucursal)
+--     4. extintores      → catálogo maestro de equipos (PK: id_extintor)
+--
+-- Nota de arquitectura: la UBICACIÓN actual de un extintor (sucursal donde está
+-- instalado) NO se almacena aquí; ese dato depende de una entidad adicional
+-- (instalaciones/asignaciones) prevista en una futura migración, evitando
+-- dependencias parciales sobre estado_actual.
+--
+-- Ejecutar con:  psql -f migrations/001_crear_tablas_esenciales.sql
+--        o en:  Supabase SQL Editor  |  npm run db:migrate
 -- =============================================================================
 
 BEGIN;
@@ -19,166 +28,140 @@ BEGIN;
 -- 1. USUARIOS
 -- -----------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS usuarios (
-    id_usuario       BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    id_usuario       SERIAL        PRIMARY KEY,
     rut              VARCHAR(12)   NOT NULL,
-    nombre_completo  VARCHAR(160)  NOT NULL,
-    email            VARCHAR(255)  NOT NULL,
+    nombre_completo  VARCHAR(120)  NOT NULL,
+    email            VARCHAR(100)  NOT NULL,
     password_hash    VARCHAR(255)  NOT NULL,
-    rol              VARCHAR(20)   NOT NULL,
+    rol              VARCHAR(25)   NOT NULL,
     estado_activo    BOOLEAN       NOT NULL DEFAULT TRUE,
-    created_at       TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
-    updated_at       TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
+    creado_en        TIMESTAMP     NOT NULL DEFAULT LOCALTIMESTAMP,
 
-    CONSTRAINT uq_usuarios_rut     UNIQUE (rut),
-    CONSTRAINT uq_usuarios_email   UNIQUE (email),
+    CONSTRAINT uq_usuarios_rut   UNIQUE (rut),
+    CONSTRAINT uq_usuarios_email UNIQUE (email),
+
     CONSTRAINT chk_usuarios_rol
         CHECK (rol IN ('ADMIN', 'GERENTE', 'TECNICO_TERRENO', 'OPERADOR_TALLER')),
-    -- Acepta RUT con o sin puntos: 12.345.678-5  |  12345678-5
+
+    -- Formato RUT chileno con o sin puntos: 12.345.678-5 | 12345678-5
     CONSTRAINT chk_usuarios_rut_formato
-        CHECK (rut ~ '^\d{1,2}\.?\d{3}\.?\d{3}-[\dkK]$')
+        CHECK (rut ~ '^[0-9]{1,2}\.?[0-9]{3}\.?[0-9]{3}-[0-9kK]$')
 );
 
-COMMENT ON TABLE  usuarios IS 'Personal del sistema (administración, taller y terreno)';
+COMMENT ON TABLE  usuarios IS 'Personal del sistema: administración, gerencia, terreno y taller';
 COMMENT ON COLUMN usuarios.rol IS 'ADMIN | GERENTE | TECNICO_TERRENO | OPERADOR_TALLER';
-COMMENT ON COLUMN usuarios.estado_activo IS 'TRUE = usuario habilitado para ingresar';
-
-CREATE INDEX IF NOT EXISTS idx_usuarios_rol ON usuarios (rol);
+COMMENT ON COLUMN usuarios.estado_activo IS 'TRUE = habilitado para iniciar sesión';
+COMMENT ON COLUMN usuarios.password_hash IS 'Hash bcrypt/argon2; nunca texto plano';
 
 -- -----------------------------------------------------------------------------
 -- 2. CLIENTES
 -- -----------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS clientes (
-    id_cliente       BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    rut              VARCHAR(12)   NOT NULL,
-    razon_social     VARCHAR(200)  NOT NULL,
-    giro             VARCHAR(120),
-    email            VARCHAR(255),
-    telefono         VARCHAR(20),
-    direccion        VARCHAR(255),
-    estado_activo    BOOLEAN       NOT NULL DEFAULT TRUE,
-    created_at       TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
-    updated_at       TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
+    id_cliente         SERIAL        PRIMARY KEY,
+    rut_empresa        VARCHAR(12)   NOT NULL,
+    razon_social       VARCHAR(150)  NOT NULL,
+    giro_comercial     VARCHAR(100),
+    telefono_contacto  VARCHAR(20),
+    email_notificacion VARCHAR(100),
+    creado_en          TIMESTAMP     NOT NULL DEFAULT LOCALTIMESTAMP,
 
-    CONSTRAINT uq_clientes_rut UNIQUE (rut),
+    CONSTRAINT uq_clientes_rut UNIQUE (rut_empresa),
+
     CONSTRAINT chk_clientes_rut_formato
-        CHECK (rut ~ '^\d{1,2}\.?\d{3}\.?\d{3}-[\dkK]$')
+        CHECK (rut_empresa ~ '^[0-9]{1,2}\.?[0-9]{3}\.?[0-9]{3}-[\dkK]$')
 );
 
-COMMENT ON TABLE clientes IS 'Empresas o personas que contratan el servicio';
+COMMENT ON TABLE  clientes IS 'Empresas o personas titulares de equipos (propios o comodato)';
+COMMENT ON COLUMN clientes.email_notificacion IS 'Correo para notificaciones de servicio y vencimientos';
 
 -- -----------------------------------------------------------------------------
 -- 3. SUCURSALES
 -- -----------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS sucursales (
-    id_sucursal      BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    id_cliente       BIGINT        NOT NULL,
-    nombre           VARCHAR(160)  NOT NULL,
-    direccion        VARCHAR(255)  NOT NULL,
-    comuna           VARCHAR(80),
-    ciudad           VARCHAR(80),
-    telefono         VARCHAR(20),
-    estado_activo    BOOLEAN       NOT NULL DEFAULT TRUE,
-    created_at       TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
-    updated_at       TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
+    id_sucursal     SERIAL        PRIMARY KEY,
+    id_cliente      INT           NOT NULL,
+    nombre_sucursal VARCHAR(120)  NOT NULL,
+    direccion       VARCHAR(200)  NOT NULL,
+    comuna          VARCHAR(80),
+    region          VARCHAR(80),
+    contacto_local  VARCHAR(120),
+    creado_en       TIMESTAMP     NOT NULL DEFAULT LOCALTIMESTAMP,
 
     CONSTRAINT fk_sucursales_cliente
         FOREIGN KEY (id_cliente) REFERENCES clientes (id_cliente)
         ON UPDATE CASCADE
         ON DELETE RESTRICT,
-    -- Evita sucursales duplicadas con el mismo nombre dentro de un cliente
-    CONSTRAINT uq_sucursales_cliente_nombre UNIQUE (id_cliente, nombre),
-    -- Requerida por la FK compuesta de extintores (id_sucursal, id_cliente)
-    CONSTRAINT uq_sucursales_id UNIQUE (id_sucursal, id_cliente)
+
+    -- Evita sucursales homónimas dentro del mismo cliente
+    CONSTRAINT uq_sucursales_cliente_nombre UNIQUE (id_cliente, nombre_sucursal)
 );
 
-COMMENT ON TABLE sucursales IS 'Dependencias físicas de un cliente donde se instalan equipos';
--- El índice uq_sucursales_cliente_nombre (id_cliente, nombre) ya cubre búsquedas por id_cliente
+COMMENT ON TABLE sucursales IS 'Dependencias físicas de un cliente (3FN: no duplica datos del cliente)';
+
+-- PostgreSQL no indexa FKs automáticamente
+CREATE INDEX IF NOT EXISTS idx_sucursales_cliente ON sucursales (id_cliente);
 
 -- -----------------------------------------------------------------------------
--- 4. EXTINTORES
+-- 4. EXTINTORES (catálogo maestro)
 -- -----------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS extintores (
-    id_extintor      BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    codigo           VARCHAR(30)   NOT NULL,
-    tipo_propiedad   VARCHAR(20)   NOT NULL,
-    id_cliente       BIGINT        NOT NULL,
-    id_sucursal      BIGINT        NOT NULL,
-    tipo_agente      VARCHAR(20)   NOT NULL,
-    capacidad        NUMERIC(5,2)  NOT NULL,
-    estado_actual    VARCHAR(30)   NOT NULL DEFAULT 'OPERATIVO',
-    marca            VARCHAR(80),
-    modelo           VARCHAR(80),
-    numero_serie     VARCHAR(80),
-    created_at       TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
-    updated_at       TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
+    id_extintor             SERIAL        PRIMARY KEY,
+    codigo_qr               VARCHAR(64)   NOT NULL,
+    numero_serie_fabricante VARCHAR(60),
+    tipo_propiedad          VARCHAR(20)   NOT NULL,
+    id_cliente_propietario  INT,
+    tipo_agente              VARCHAR(30)   NOT NULL,
+    capacidad_kg            NUMERIC(5,2)  NOT NULL,
+    estado_actual           VARCHAR(30)   NOT NULL DEFAULT 'DISPONIBLE_BODEGA',
+    fecha_fabricacion       DATE,
+    fecha_ultima_ph         DATE,
+    creado_en               TIMESTAMP     NOT NULL DEFAULT LOCALTIMESTAMP,
 
-    CONSTRAINT uq_extintores_codigo UNIQUE (codigo),
+    CONSTRAINT uq_extintores_codigo_qr UNIQUE (codigo_qr),
 
-    CONSTRAINT fk_extintores_cliente
-        FOREIGN KEY (id_cliente) REFERENCES clientes (id_cliente)
-        ON UPDATE CASCADE
-        ON DELETE RESTRICT,
-
-    -- FK compuesta: la sucursal debe existir y pertenecer al mismo cliente
-    CONSTRAINT fk_extintores_ubicacion
-        FOREIGN KEY (id_sucursal, id_cliente)
-        REFERENCES sucursales (id_sucursal, id_cliente)
+    CONSTRAINT fk_extintores_propietario
+        FOREIGN KEY (id_cliente_propietario) REFERENCES clientes (id_cliente)
         ON UPDATE CASCADE
         ON DELETE RESTRICT,
 
     CONSTRAINT chk_extintores_tipo_propiedad
         CHECK (tipo_propiedad IN ('CLIENTE', 'COMODATO_EXTEAM')),
 
-    CONSTRAINT chk_extintores_tipo_agente
-        CHECK (tipo_agente IN ('POLVO_QUIMICO', 'CO2', 'ESPUMA', 'AGUA', 'HALON')),
+    -- Un equipo de propiedad CLIENTE debe declarar cliente propietario;
+    -- en COMODATO_EXTEAM el propietario es ExteamLlamas → se permite NULL.
+    CONSTRAINT chk_extintores_requiere_propietario
+        CHECK (tipo_propiedad <> 'CLIENTE' OR id_cliente_propietario IS NOT NULL),
 
-    CONSTRAINT chk_extintores_capacidad
-        CHECK (capacidad > 0),
+    CONSTRAINT chk_extintores_tipo_agente
+        CHECK (tipo_agente IN ('PQS', 'CO2', 'AGUA', 'ACETATO_K')),
+
+    CONSTRAINT chk_extintores_capacidad_kg
+        CHECK (capacidad_kg > 0),
 
     CONSTRAINT chk_extintores_estado_actual
-        CHECK (estado_actual IN ('OPERATIVO', 'EN_MANTENIMIENTO', 'VENCIDO', 'BAJA'))
+        CHECK (estado_actual IN (
+            'INSTALADO',
+            'EN_TRANSITO_TALLER',
+            'EN_TALLER',
+            'DISPONIBLE_BODEGA',
+            'BAJA'
+        )),
+
+    -- Integridad temporal: la última prueba hidrostática no puede ser
+    -- anterior a la fabricación (NULLs se aceptan; CHECK pasa con NULL).
+    CONSTRAINT chk_extintores_fechas
+        CHECK (fecha_fabricacion IS NULL
+               OR fecha_ultima_ph IS NULL
+               OR fecha_ultima_ph >= fecha_fabricacion)
 );
 
-COMMENT ON TABLE  extintores IS 'Inventario de extintores instalados (propios o en comodato)';
-COMMENT ON COLUMN extintores.tipo_propiedad IS 'CLIENTE = propiedad del cliente | COMODATO_EXTEAM = prestado por ExteamLlamas';
-COMMENT ON COLUMN extintores.capacidad IS 'Capacidad nominal en litros/kilogramos según tipo de agente';
-COMMENT ON COLUMN extintores.estado_actual IS 'OPERATIVO | EN_MANTENIMIENTO | VENCIDO | BAJA';
+COMMENT ON TABLE  extintores IS 'Catálogo maestro de extintores (sin dependencia de sucursal actual)';
+COMMENT ON COLUMN extintores.tipo_propiedad IS 'CLIENTE = dueño es el cliente | COMODATO_EXTEAM = prestado por ExteamLlamas';
+COMMENT ON COLUMN extintores.id_cliente_propietario IS 'NULL cuando tipo_propiedad = COMODATO_EXTEAM';
+COMMENT ON COLUMN extintores.estado_actual IS 'INSTALADO | EN_TRANSITO_TALLER | EN_TALLER | DISPONIBLE_BODEGA | BAJA';
+COMMENT ON COLUMN extintores.fecha_ultima_ph IS 'Fecha de última prueba hidrostática';
 
-CREATE INDEX IF NOT EXISTS idx_extintores_cliente  ON extintores (id_cliente);
-CREATE INDEX IF NOT EXISTS idx_extintores_sucursal ON extintores (id_sucursal, id_cliente);
-CREATE INDEX IF NOT EXISTS idx_extintores_estado   ON extintores (estado_actual);
-CREATE INDEX IF NOT EXISTS idx_extintores_agente   ON extintores (tipo_agente);
-
--- -----------------------------------------------------------------------------
--- 5. TRIGGER: updated_at automático en todas las tablas
--- -----------------------------------------------------------------------------
-CREATE OR REPLACE FUNCTION fn_set_updated_at()
-RETURNS TRIGGER AS $$
-BEGIN
-    NEW.updated_at = NOW();
-    RETURN NEW;
-END;
-$$ LANGUAGE plpgsql;
-
-DROP TRIGGER IF EXISTS trg_usuarios_updated_at   ON usuarios;
-DROP TRIGGER IF EXISTS trg_clientes_updated_at   ON clientes;
-DROP TRIGGER IF EXISTS trg_sucursales_updated_at ON sucursales;
-DROP TRIGGER IF EXISTS trg_extintores_updated_at ON extintores;
-
-CREATE TRIGGER trg_usuarios_updated_at
-    BEFORE UPDATE ON usuarios
-    FOR EACH ROW EXECUTE FUNCTION fn_set_updated_at();
-
-CREATE TRIGGER trg_clientes_updated_at
-    BEFORE UPDATE ON clientes
-    FOR EACH ROW EXECUTE FUNCTION fn_set_updated_at();
-
-CREATE TRIGGER trg_sucursales_updated_at
-    BEFORE UPDATE ON sucursales
-    FOR EACH ROW EXECUTE FUNCTION fn_set_updated_at();
-
-CREATE TRIGGER trg_extintores_updated_at
-    BEFORE UPDATE ON extintores
-    FOR EACH ROW EXECUTE FUNCTION fn_set_updated_at();
+CREATE INDEX IF NOT EXISTS idx_extintores_propietario ON extintores (id_cliente_propietario);
+CREATE INDEX IF NOT EXISTS idx_extintores_estado      ON extintores (estado_actual);
 
 COMMIT;
