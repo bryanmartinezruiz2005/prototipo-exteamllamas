@@ -6,7 +6,9 @@ import { defineConfig } from 'vite';
 export default defineConfig({
   plugins: [react(), tailwindcss()],
   server: {
-    // Puerto fijo para que coincida con la configuración CORS del backend
+    // Puerto fijo para que coincida con la configuración CORS del backend.
+    // Solo se expone en local (localhost); para acceder desde el teléfono
+    // hay que agregar host: true.
     port: 5173,
   },
 });

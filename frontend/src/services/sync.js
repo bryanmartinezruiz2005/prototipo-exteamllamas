@@ -9,7 +9,13 @@
 // ---------------------------------------------------------------------------
 import { db, obtenerPendientes } from '../db/dexie.js';
 
-const API_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:3001/api';
+// URL base del backend.
+// - Se puede fijar con VITE_API_URL (frontend/.env).
+// - Si no, se deriva del host desde el que se sirve la página: así funciona
+//   igual en localhost (desde la PC) y con la IP local (desde el teléfono),
+//   donde "localhost" apuntaría al propio dispositivo.
+const API_URL =
+  import.meta.env.VITE_API_URL ?? `http://${window.location.hostname || 'localhost'}:3001/api`;
 
 // Evita que dos disparos simultáneos (evento "online" + clic) lancen
 // dos sincronizaciones a la vez.
