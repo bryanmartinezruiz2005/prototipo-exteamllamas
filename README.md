@@ -66,35 +66,104 @@ Proyecto de título app/
 
 ## Requisitos
 
-- **Node.js 18.17+** (probado con Node 24)
-- **PostgreSQL 14+** corriendo en local (puerto 5432)
+| Requisito | Versión | Verificar |
+|---|---|---|
+| **Node.js** | 18.17+ (probado con Node 24) | `node --version` |
+| **npm** | incluido con Node | `npm --version` |
+| **PostgreSQL** | 14+ corriendo en el puerto 5432 | `pg_isready` o revisar el servicio |
+| **Git** | cualquier versión reciente | `git --version` |
 
-## Puesta en marcha
+## Clonar e instalar desde cero
 
-### 1. Base de datos (una sola vez)
+> **Importante:** `.gitignore` excluye `backend/.env` y las carpetas
+> `node_modules/` (contienen secretos y dependencias generadas). Después de
+> clonar, esos elementos hay que crearlos/instalarlos a mano — es la causa
+> más común de errores al levantar el sistema.
+
+### 1. Clonar el repositorio
 
 ```powershell
-# crear la base (ajusta credenciales a las tuyas)
-$env:PGPASSWORD='tu_contraseña'; & "C:\Program Files\PostgreSQL\18\bin\psql.exe" -U postgres -h localhost -c "CREATE DATABASE prototipo_db;"
+git clone <url-del-repo>
+cd <carpeta-del-repo>
 ```
 
-### 2. Backend (terminal 1)
+### 2. Crear la base de datos (una sola vez)
+
+Desde `psql` (o desde pgAdmin, si prefieres una interfaz gráfica):
+
+```powershell
+psql -U postgres -c "CREATE DATABASE prototipo_db;"
+```
+
+> **Windows, si `psql` no está en el PATH:**
+> `"C:\Program Files\PostgreSQL\18\bin\psql.exe" -U postgres -c "CREATE DATABASE prototipo_db;"`
+
+El nombre puede ser cualquiera: lo importante es que coincida con
+`PGDATABASE` del `.env` en el paso siguiente.
+
+### 3. Backend (terminal 1)
 
 ```powershell
 cd backend
-Copy-Item .env.example .env   # ajusta PGUSER / PGPASSWORD / PGDATABASE
+Copy-Item .env.example .env    # Mac/Linux: cp .env.example .env
 npm install
-npm run db:migrate            # crea registros_prueba + operation_uuid
-npm run dev                   # http://localhost:3001
+npm run db:migrate
+npm run dev
 ```
 
-### 3. Frontend / PWA (terminal 2)
+| Paso | Qué hace |
+|---|---|
+| `Copy-Item .env.example .env` | Crea tu configuración local: **edita** `PGUSER`, `PGPASSWORD` y `PGDATABASE` para que coincidan con **tu** PostgreSQL (no hace falta usar las mismas credenciales de otro equipo) |
+| `npm install` | Instala las dependencias en `node_modules/` (no vienen en el clone) |
+| `npm run db:migrate` | Crea las tablas `registros_prueba` + `operation_uuid` (scripts SQL idempotentes, se pueden re-ejecutar) |
+| `npm run dev` | Arranca Express en `http://localhost:3001` con recarga automática |
+
+### 4. Frontend / PWA (terminal 2)
 
 ```powershell
 cd frontend
 npm install
-npm run dev                   # http://localhost:5173
+npm run dev                   # → http://localhost:5173
 ```
+
+### 5. Verificar que todo funciona
+
+```powershell
+curl.exe http://localhost:3001/api/health
+# esperado: {"ok":true,"db":"conectado",...}
+```
+
+Luego abre `http://localhost:5173`.
+
+### Qué NO necesitas instalar
+
+- **`frontend/.env`** es opcional: sin él la PWA deriva la URL del backend
+  automáticamente. Solo créalo si quieres forzar otra URL (`VITE_API_URL`).
+- **Datos ni semillas**: cada clone arranca con la base vacía; los registros
+  guardados en IndexedDB son locales a cada navegador.
+
+### Errores comunes al clonar
+
+| Error | Causa | Solución |
+|---|---|---|
+| `Error [ERR_MODULE_NOT_FOUND]: Cannot find package 'cors'` | Falta `npm install` | Instalar dependencias en `backend/` (y también en `frontend/`) |
+| `la autentificación password falló para el usuario...` | El `.env` no coincide con tu PostgreSQL | Corregir `PGPASSWORD` |
+| `no existe la base de datos «X»` | No creó la BD o el nombre difiere del `.env` | Crear la BD o ajustar `PGDATABASE` |
+| Windows pregunta permiso al arrancar | Firewall de Windows | Permitir node.exe ("Permitir acceso") |
+| `error: listen EADDRINUSE` | Ya hay otro proceso en el puerto 3001 o 5173 | Cerrar el proceso anterior |
+
+### Acceso desde otro dispositivo (opcional)
+
+Por defecto todo corre solo en local. Para abrir la PWA desde el teléfono
+(misma red Wi-Fi):
+
+1. Agregar `host: true` dentro de `server` en `frontend/vite.config.js`
+   (Vite se reinicia solo con el cambio).
+2. Abrir `http://<IP-de-la-PC>:5173` (la IP se consulta con `ipconfig`).
+3. La URL de la API se adapta sola al host desde el que se sirve la página.
+
+> En el teléfono, `http://<IP>` no es un contexto seguro: el service worker
+> no se registrará, pero IndexedDB (los datos offline) funciona igual.
 
 ## Cómo probar el flujo offline-first
 
