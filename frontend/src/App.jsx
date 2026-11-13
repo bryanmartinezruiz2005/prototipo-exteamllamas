@@ -93,7 +93,9 @@ export default function App() {
       </main>
 
       <footer className="mx-auto max-w-3xl px-4 pb-8 text-center text-xs text-slate-400">
-        Backend: http://localhost:3001 · Frontend: http://localhost:5173
+        {import.meta.env.DEV
+          ? 'Backend: http://localhost:3001 · Frontend: http://localhost:5173'
+          : 'Prototipo offline-first · datos en IndexedDB con sincronización FIFO e idempotente'}
       </footer>
     </div>
   );

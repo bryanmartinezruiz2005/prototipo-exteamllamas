@@ -1,0 +1,15 @@
+{
+  "name": "offline-first-prototipo",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Micro-prototipo offline-first: Express + PostgreSQL + PWA React/Dexie",
+  "engines": {
+    "node": ">=18.17"
+  },
+  "scripts": {
+    "build": "npm --prefix backend ci && npm --prefix frontend ci && npm --prefix frontend run build",
+    "start": "npm --prefix backend run start",
+    "dev:backend": "npm --prefix backend run dev",
+    "dev:frontend": "npm --prefix frontend run dev"
+  }
+}

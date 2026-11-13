@@ -9,7 +9,7 @@
   },
   "scripts": {
     "dev": "node --watch src/server.js",
-    "start": "node src/server.js",
+    "start": "node scripts/migrate.js && node src/server.js",
     "db:migrate": "node scripts/migrate.js"
   },
   "dependencies": {

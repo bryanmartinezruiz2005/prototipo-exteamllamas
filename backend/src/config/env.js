@@ -1,10 +1,24 @@
 // ---------------------------------------------------------------------------
-// Configuración centralizada de variables de entorno (.env).
-// Carga dotenv y aplica valores por defecto aptos para desarrollo local,
-// de modo que el prototipo arranque sin tocar nada si PostgreSQL usa
-// credenciales estándar (postgres/postgres).
+// Configuración centralizada de variables de entorno.
+//
+// - Local: carga backend/.env (dotenv) y aplica valores por defecto aptos
+//   para desarrollo (postgres/postgres como respaldo).
+// - Railway/producción: la plataforma inyecta las variables (PORT,
+//   DATABASE_URL...) directamente en el entorno; dotenv NO sobreescribe
+//   las variables que ya están definidas, así que prevalece la de la
+//   plataforma.
 // ---------------------------------------------------------------------------
-import 'dotenv/config';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+import dotenv from 'dotenv';
+
+// Ruta a backend/.env sin importar desde dónde se ejecute el proceso
+const RUTA_ENV = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  '../../.env',
+);
+dotenv.config({ path: RUTA_ENV });
 
 const DEFECTOS = {
   NODE_ENV: 'development',
@@ -32,6 +46,9 @@ export const env = {
   nodeEnv,
   isProduction: nodeEnv === 'production',
   port: leerEntero('PORT', DEFECTOS.PORT),
+  // Conexión completa inyectada por proveedores (Railway: DATABASE_URL).
+  // Si existe, tiene prioridad sobre las variables PG*.
+  databaseUrl: leerTexto('DATABASE_URL', null),
   db: {
     host: leerTexto('PGHOST', DEFECTOS.PGHOST),
     port: leerEntero('PGPORT', DEFECTOS.PGPORT),
@@ -46,6 +63,8 @@ export function resumenEnv() {
   return {
     nodeEnv: env.nodeEnv,
     port: env.port,
-    db: { ...env.db, password: '***' },
+    db: env.databaseUrl
+      ? { origen: 'DATABASE_URL (inyectado por la plataforma)', password: '***' }
+      : { ...env.db, password: '***' },
   };
 }

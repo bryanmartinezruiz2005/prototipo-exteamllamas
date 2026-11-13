@@ -165,6 +165,49 @@ Por defecto todo corre solo en local. Para abrir la PWA desde el teléfono
 > En el teléfono, `http://<IP>` no es un contexto seguro: el service worker
 > no se registrará, pero IndexedDB (los datos offline) funciona igual.
 
+## Despliegue en Railway
+
+Rama: `railway`. Arquitectura elegida: **un solo servicio** — Express sirve
+la API y la PWA compilada (`frontend/dist`), con PostgreSQL gestionado por
+Railway.
+
+### Qué cambia respecto a local
+
+| Componente | Local | Railway |
+|---|---|---|
+| Conexión a la BD | variables `PG*` en `backend/.env` | `DATABASE_URL` inyectado por Railway (SSL) |
+| Frontend | Vite en `:5173` | servido por Express desde `frontend/dist` |
+| URL de la API | `http://<host>:3001/api` | ruta relativa `/api` (mismo origen, HTTPS) |
+| Puerto | 3001 (`.env`) | variable `PORT` que inyecta Railway |
+| Migraciones | `npm run db:migrate` manual | se ejecutan en cada arranque (`npm start`) |
+| Service worker | no registra (HTTP) | sí registra (HTTPS) |
+
+La configuración del despliegue vive en `railway.json` (raíz del repo):
+
+- **build**: `npm --prefix backend ci && npm --prefix frontend ci && npm --prefix frontend run build`
+- **start**: `npm --prefix backend run start` → migraciones + servidor
+
+### Pasos en el panel de Railway
+
+1. Subir la rama: `git push origin railway`
+2. En [railway.com](https://railway.com) → **New Project → Deploy from
+   GitHub repo** → seleccionar el repositorio y la rama **`railway`**.
+3. Dentro del proyecto: **+ Service → Database → Postgres**. Railway
+   inyecta `DATABASE_URL` automáticamente a los servicios del proyecto.
+4. Esperar el build (Nixpacks) hasta que el servicio pase a *Active*.
+5. Abrir la URL pública generada (`https://<nombre>.up.railway.app`).
+6. Verificar: `https://<nombre>.up.railway.app/api/health` →
+   `{"ok":true,"db":"conectado",...}`
+
+### Notas
+
+- Railway no ofrece un plan gratuito permanente: requiere cuenta con crédito.
+- En el primer arranque, las migraciones crean las tablas en una base vacía.
+- Variable opcional en el servicio: `NODE_ENV=production`.
+- Si algún día se separa frontend y backend en dos servicios, basta con
+  definir `VITE_API_URL` en el build del frontend (por eso se mantiene como
+  opción en `sync.js`).
+
 ## Cómo probar el flujo offline-first
 
 1. Abre `http://localhost:5173`.
